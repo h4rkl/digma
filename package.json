@@ -1,0 +1,41 @@
+{
+  "name": "digma",
+  "version": "1.0.0",
+  "description": "Digma — MCP server bridging AI editors to Figma for chat-driven design (security-hardened fork of figsor)",
+  "type": "module",
+  "main": "dist/server.js",
+  "bin": {
+    "digma": "./dist/server.js"
+  },
+  "files": [
+    "dist/"
+  ],
+  "keywords": [
+    "figma",
+    "cursor",
+    "mcp",
+    "design",
+    "ai",
+    "model-context-protocol"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "tsc && node dist/server.js",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "ws": "^8.18.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "@types/ws": "^8.18.0",
+    "typescript": "^5.7.3"
+  }
+}

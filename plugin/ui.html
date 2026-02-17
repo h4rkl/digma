@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: Inter, system-ui, -apple-system, sans-serif;
+    font-size: 12px;
+    color: #e4e4e7;
+    background: #18181b;
+    padding: 12px;
+  }
+  .status-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #52525b;
+    flex-shrink: 0;
+  }
+  .dot.connecting { background: #eab308; }
+  .dot.connected { background: #22c55e; }
+  .dot.error { background: #ef4444; }
+  .status-label {
+    color: #a1a1aa;
+    font-size: 11px;
+  }
+  hr {
+    border: none;
+    border-top: 1px solid #27272a;
+    margin: 12px 0;
+  }
+  h3 {
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #fafafa;
+  }
+  label {
+    display: block;
+    font-size: 11px;
+    color: #a1a1aa;
+    margin-bottom: 4px;
+  }
+  input[type="text"] {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid #3f3f46;
+    border-radius: 4px;
+    font-size: 11px;
+    margin-bottom: 8px;
+    outline: none;
+    background: #27272a;
+    color: #e4e4e7;
+  }
+  input[type="text"]::placeholder { color: #71717a; }
+  input[type="text"]:focus { border-color: #3b82f6; }
+  button {
+    background: #3b82f6;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  button:hover { background: #2563eb; }
+  button:disabled { background: #3f3f46; color: #71717a; cursor: not-allowed; }
+  .scan-status {
+    font-size: 11px;
+    color: #a1a1aa;
+    margin-top: 6px;
+  }
+  .scan-status.error { color: #f87171; }
+  .scan-status.success { color: #4ade80; }
+
+  /* --- Activity Log --- */
+  .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    user-select: none;
+  }
+  .section-header h3 { margin-bottom: 0; }
+  .toggle-arrow {
+    font-size: 10px;
+    color: #71717a;
+    transition: transform 0.15s;
+  }
+  .toggle-arrow.collapsed { transform: rotate(-90deg); }
+  .collapsible { overflow: hidden; }
+  .collapsible.collapsed { display: none; }
+
+  .log-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+  }
+  .log-toolbar .count {
+    font-size: 10px;
+    color: #71717a;
+  }
+  .log-toolbar button {
+    font-size: 10px;
+    padding: 2px 8px;
+    background: #3f3f46;
+    color: #a1a1aa;
+  }
+  .log-toolbar button:hover { background: #52525b; }
+  #logPanel {
+    background: #09090b;
+    border-radius: 4px;
+    padding: 6px 8px;
+    max-height: 240px;
+    overflow-y: auto;
+    font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+    font-size: 10px;
+    line-height: 1.5;
+    color: #d4d4d8;
+  }
+  #logPanel:empty::before {
+    content: 'Waiting for commands...';
+    color: #52525b;
+    font-style: italic;
+  }
+  .log-entry { margin-bottom: 2px; }
+  .log-cmd { color: #93c5fd; }
+  .log-ok { color: #67e8f9; }
+  .log-err { color: #f87171; }
+  .log-time { color: #71717a; }
+  .log-params { color: #a1a1aa; }
+  .log-duration { color: #fde047; }
+  .log-sys { color: #71717a; font-style: italic; }
+</style>
+</head>
+<body>
+
+<div class="status-bar">
+  <div class="dot" id="dot"></div>
+  <span class="status-label" id="statusLabel">Disconnected</span>
+</div>
+
+<hr>
+
+<div class="section-header" id="logToggle">
+  <h3>Activity Log</h3>
+  <span class="toggle-arrow" id="logArrow">&#9660;</span>
+</div>
+<div class="collapsible" id="logSection">
+  <div class="log-toolbar">
+    <span class="count" id="logCount">0 commands</span>
+    <button id="logClear">Clear</button>
+  </div>
+  <div id="logPanel"></div>
+</div>
+
+<hr>
+
+<div class="section-header" id="scanToggle">
+  <h3>Library Scanner</h3>
+  <span class="toggle-arrow collapsed" id="scanArrow">&#9660;</span>
+</div>
+<div class="collapsible collapsed" id="scanSection">
+  <label>Figma Access Token</label>
+  <input type="text" id="token" placeholder="figd_XXXX..." />
+  <label>Library File Key</label>
+  <input type="text" id="fileKey" placeholder="e.g. AbCdEfGhIjKlMn" />
+  <button id="scanBtn" disabled>Scan Library</button>
+  <div class="scan-status" id="scanStatus"></div>
+</div>
+
+<script>
+(function () {
+  // --- Config ---
+  const WS_URL = 'ws://127.0.0.1:3055';
+  const HANDSHAKE_KEY = 'fgsr7x9KmQ3pWv2RnL8jHt5YcD4sbA6e';
+  const RECONNECT_BASE = 2000;
+  const RECONNECT_MAX = 30000;
+
+  // --- State ---
+  let ws = null;
+  let authenticated = false;
+  let reconnectDelay = RECONNECT_BASE;
+  let reconnectTimer = null;
+
+  // --- DOM ---
+  const dot = document.getElementById('dot');
+  const statusLabel = document.getElementById('statusLabel');
+  const scanBtn = document.getElementById('scanBtn');
+  const scanStatus = document.getElementById('scanStatus');
+  const tokenInput = document.getElementById('token');
+  const fileKeyInput = document.getElementById('fileKey');
+
+  // --- Activity Log DOM ---
+  const logPanel = document.getElementById('logPanel');
+  const logCount = document.getElementById('logCount');
+  const logClear = document.getElementById('logClear');
+  const logToggle = document.getElementById('logToggle');
+  const logArrow = document.getElementById('logArrow');
+  const logSection = document.getElementById('logSection');
+  const scanToggle = document.getElementById('scanToggle');
+  const scanArrow = document.getElementById('scanArrow');
+  const scanSection = document.getElementById('scanSection');
+
+  var pendingCommands = {};
+  var commandCount = 0;
+
+  function setStatus(state, text) {
+    dot.className = 'dot ' + state;
+    statusLabel.textContent = text;
+    scanBtn.disabled = !authenticated;
+  }
+
+  function timestamp() {
+    var d = new Date();
+    return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+
+  function truncate(str, max) {
+    if (!str) return '';
+    if (str.length <= max) return str;
+    return str.slice(0, max) + '...';
+  }
+
+  function summarizeParams(params) {
+    if (!params) return '';
+    var keys = Object.keys(params);
+    if (keys.length === 0) return '';
+    var parts = [];
+    for (var i = 0; i < Math.min(keys.length, 3); i++) {
+      var v = params[keys[i]];
+      if (typeof v === 'string') v = truncate(v, 20);
+      else if (typeof v === 'object') v = '{...}';
+      parts.push(keys[i] + '=' + v);
+    }
+    if (keys.length > 3) parts.push('+' + (keys.length - 3) + ' more');
+    return parts.join(', ');
+  }
+
+  function addLogEntry(html) {
+    var div = document.createElement('div');
+    div.className = 'log-entry';
+    div.innerHTML = html;
+    logPanel.appendChild(div);
+    logPanel.scrollTop = logPanel.scrollHeight;
+  }
+
+  function logCommand(id, command, params) {
+    commandCount++;
+    pendingCommands[id] = Date.now();
+    var paramStr = summarizeParams(params);
+    var paramHtml = paramStr ? ' <span class="log-params">(' + paramStr.replace(/</g, '&lt;') + ')</span>' : '';
+    addLogEntry(
+      '<span class="log-time">' + timestamp() + '</span> ' +
+      '<span class="log-cmd">' + command + '</span>' + paramHtml
+    );
+    logCount.textContent = commandCount + ' command' + (commandCount === 1 ? '' : 's');
+  }
+
+  function logResponse(id, isError, detail) {
+    var start = pendingCommands[id];
+    var duration = start ? (Date.now() - start) : 0;
+    delete pendingCommands[id];
+    var durStr = duration ? ' <span class="log-duration">' + duration + 'ms</span>' : '';
+    if (isError) {
+      addLogEntry(
+        '<span class="log-time">' + timestamp() + '</span> ' +
+        '<span class="log-err">ERR</span> ' +
+        truncate(String(detail), 60).replace(/</g, '&lt;') + durStr
+      );
+    } else {
+      var brief = '';
+      if (detail && typeof detail === 'object') {
+        if (detail.nodeId) brief = detail.nodeId;
+        else if (detail.count !== undefined) brief = 'count=' + detail.count;
+        else brief = 'ok';
+      } else {
+        brief = 'ok';
+      }
+      addLogEntry(
+        '<span class="log-time">' + timestamp() + '</span> ' +
+        '<span class="log-ok">OK</span> ' + brief + durStr
+      );
+    }
+  }
+
+  function logSystem(text) {
+    addLogEntry('<span class="log-time">' + timestamp() + '</span> <span class="log-sys">' + text + '</span>');
+  }
+
+  // --- Collapsible sections ---
+  logToggle.addEventListener('click', function () {
+    logSection.classList.toggle('collapsed');
+    logArrow.classList.toggle('collapsed');
+  });
+  scanToggle.addEventListener('click', function () {
+    scanSection.classList.toggle('collapsed');
+    scanArrow.classList.toggle('collapsed');
+  });
+  logClear.addEventListener('click', function () {
+    logPanel.innerHTML = '';
+    commandCount = 0;
+    pendingCommands = {};
+    logCount.textContent = '0 commands';
+  });
+
+  // --- Pure JS SHA-256 + HMAC (no Web Crypto needed) ---
+  function sha256(input) {
+    var K=[0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+    function rr(x,n){return(x>>>n)|(x<<(32-n));}
+    var m=[];
+    if(typeof input==='string'){for(var i=0;i<input.length;i++){var c=input.charCodeAt(i);if(c<128)m.push(c);else if(c<2048){m.push(192|(c>>6));m.push(128|(c&63));}else{m.push(224|(c>>12));m.push(128|((c>>6)&63));m.push(128|(c&63));}}}else{m=input.slice();}
+    var l=m.length*8;m.push(128);while(m.length%64!==56)m.push(0);
+    m.push(0,0,0,0,(l>>>24)&255,(l>>>16)&255,(l>>>8)&255,l&255);
+    var H=[0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+    for(var off=0;off<m.length;off+=64){
+      var w=[];for(var i=0;i<16;i++)w[i]=(m[off+i*4]<<24)|(m[off+i*4+1]<<16)|(m[off+i*4+2]<<8)|m[off+i*4+3];
+      for(var i=16;i<64;i++){var s0=rr(w[i-15],7)^rr(w[i-15],18)^(w[i-15]>>>3);var s1=rr(w[i-2],17)^rr(w[i-2],19)^(w[i-2]>>>10);w[i]=(w[i-16]+s0+w[i-7]+s1)|0;}
+      var v=H.slice();
+      for(var i=0;i<64;i++){
+        var S1=rr(v[4],6)^rr(v[4],11)^rr(v[4],25);var ch=(v[4]&v[5])^((~v[4])&v[6]);var t1=(v[7]+S1+ch+K[i]+w[i])|0;
+        var S0=rr(v[0],2)^rr(v[0],13)^rr(v[0],22);var mj=(v[0]&v[1])^(v[0]&v[2])^(v[1]&v[2]);var t2=(S0+mj)|0;
+        v[7]=v[6];v[6]=v[5];v[5]=v[4];v[4]=(v[3]+t1)|0;v[3]=v[2];v[2]=v[1];v[1]=v[0];v[0]=(t1+t2)|0;
+      }
+      for(var i=0;i<8;i++)H[i]=(H[i]+v[i])|0;
+    }
+    var out=[];for(var i=0;i<8;i++){out.push((H[i]>>>24)&255,(H[i]>>>16)&255,(H[i]>>>8)&255,H[i]&255);}
+    return out;
+  }
+
+  function hmacSha256(key,msg){
+    var kb=[];if(typeof key==='string')for(var i=0;i<key.length;i++)kb.push(key.charCodeAt(i));else kb=key.slice();
+    if(kb.length>64)kb=sha256(kb);while(kb.length<64)kb.push(0);
+    var ip=[],op=[];for(var i=0;i<64;i++){ip.push(kb[i]^0x36);op.push(kb[i]^0x5c);}
+    var mb=[];if(typeof msg==='string')for(var i=0;i<msg.length;i++)mb.push(msg.charCodeAt(i));else mb=msg.slice();
+    return sha256(op.concat(sha256(ip.concat(mb)))).map(function(b){return b.toString(16).padStart(2,'0')}).join('');
+  }
+
+  // --- WebSocket ---
+  function connect() {
+    if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
+
+    setStatus('connecting', 'Connecting...');
+    ws = new WebSocket(WS_URL);
+
+    ws.onopen = function () {
+      setStatus('connecting', 'Handshaking...');
+    };
+
+    ws.onmessage = function (event) {
+      let msg;
+      try { msg = JSON.parse(event.data); } catch (e) { return; }
+
+      // --- Handshake ---
+      if (msg.type === 'handshake_challenge') {
+        try {
+          var hash = hmacSha256(HANDSHAKE_KEY, msg.nonce);
+          ws.send(JSON.stringify({ type: 'handshake_response', hash: hash }));
+        } catch (e) {
+          setStatus('error', 'Handshake failed: ' + e.message);
+        }
+        return;
+      }
+
+      if (msg.type === 'handshake_ok') {
+        authenticated = true;
+        reconnectDelay = RECONNECT_BASE;
+        setStatus('connected', 'Connected');
+        logSystem('Connected to server');
+        return;
+      }
+
+      // --- Command from server → forward to plugin sandbox ---
+      if (msg.id && msg.command) {
+        logCommand(msg.id, msg.command, msg.params);
+        parent.postMessage({ pluginMessage: { type: 'command', id: msg.id, command: msg.command, params: msg.params || {} } }, '*');
+        return;
+      }
+    };
+
+    ws.onclose = function () {
+      if (authenticated) logSystem('Disconnected');
+      authenticated = false;
+      setStatus('', 'Disconnected');
+      scheduleReconnect();
+    };
+
+    ws.onerror = function () {
+      setStatus('error', 'Connection error');
+    };
+  }
+
+  function scheduleReconnect() {
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(function () {
+      reconnectDelay = Math.min(reconnectDelay * 1.5, RECONNECT_MAX);
+      connect();
+    }, reconnectDelay);
+  }
+
+  // --- Messages from plugin sandbox → forward to WebSocket ---
+  window.onmessage = function (event) {
+    const msg = event.data.pluginMessage;
+    if (!msg) return;
+
+    if (msg.type === 'response' && ws && ws.readyState === WebSocket.OPEN && authenticated) {
+      logResponse(msg.id, false, msg.result);
+      ws.send(JSON.stringify({ id: msg.id, result: msg.result }));
+      return;
+    }
+
+    if (msg.type === 'error_response' && ws && ws.readyState === WebSocket.OPEN && authenticated) {
+      logResponse(msg.id, true, msg.error);
+      ws.send(JSON.stringify({ id: msg.id, type: 'error', error: msg.error }));
+      return;
+    }
+  };
+
+  // --- Library Scanner ---
+  scanBtn.addEventListener('click', async function () {
+    const token = tokenInput.value.trim();
+    const fileKey = fileKeyInput.value.trim();
+    if (!token || !fileKey) {
+      scanStatus.textContent = 'Please enter both fields.';
+      scanStatus.className = 'scan-status error';
+      return;
+    }
+
+    scanBtn.disabled = true;
+    scanStatus.textContent = 'Scanning...';
+    scanStatus.className = 'scan-status';
+
+    try {
+      // Fetch file metadata
+      const metaRes = await fetch('https://api.figma.com/v1/files/' + fileKey + '?depth=1', {
+        headers: { 'X-Figma-Token': token }
+      });
+      if (!metaRes.ok) throw new Error('File fetch failed: ' + metaRes.status);
+      const meta = await metaRes.json();
+
+      // Fetch components
+      const compRes = await fetch('https://api.figma.com/v1/files/' + fileKey + '/components', {
+        headers: { 'X-Figma-Token': token }
+      });
+      if (!compRes.ok) throw new Error('Components fetch failed: ' + compRes.status);
+      const compData = await compRes.json();
+
+      // Fetch styles
+      const styleRes = await fetch('https://api.figma.com/v1/files/' + fileKey + '/styles', {
+        headers: { 'X-Figma-Token': token }
+      });
+      if (!styleRes.ok) throw new Error('Styles fetch failed: ' + styleRes.status);
+      const styleData = await styleRes.json();
+
+      var components = (compData.meta && compData.meta.components) || [];
+      var styles = (styleData.meta && styleData.styles) || [];
+
+      var catalog = {
+        fileKey: fileKey,
+        fileName: meta.name || fileKey,
+        components: components.map(function (c) {
+          return {
+            key: c.key,
+            name: c.name,
+            description: c.description || '',
+            componentSetName: c.containing_frame && c.containing_frame.containingStateGroup
+              ? c.containing_frame.containingStateGroup.name : undefined,
+            containingFrame: c.containing_frame ? c.containing_frame.name : undefined
+          };
+        }),
+        styles: styles.map(function (s) {
+          return {
+            key: s.key,
+            name: s.name,
+            styleType: s.style_type,
+            description: s.description || ''
+          };
+        }),
+        scannedAt: new Date().toISOString()
+      };
+
+      // Send catalog to server
+      if (ws && ws.readyState === WebSocket.OPEN && authenticated) {
+        ws.send(JSON.stringify({ type: 'catalog_update', catalog: catalog }));
+      }
+
+      scanStatus.textContent = 'Found ' + components.length + ' components, ' + styles.length + ' styles.';
+      scanStatus.className = 'scan-status success';
+    } catch (e) {
+      scanStatus.textContent = e.message || 'Scan failed';
+      scanStatus.className = 'scan-status error';
+    } finally {
+      scanBtn.disabled = !authenticated;
+    }
+  });
+
+  // --- Init ---
+  connect();
+})();
+</script>
+
+</body>
+</html>
