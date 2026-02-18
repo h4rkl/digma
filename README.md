@@ -25,7 +25,7 @@ All communication stays on your machine. Nothing is sent externally.
 ### 1. Build the server
 
 ```sh
-cd /Users/karambit/Sites/ai-ops/digma
+cd digma
 pnpm install
 pnpm run build
 ```
@@ -50,7 +50,7 @@ For the web app, use **Plugins > Development > Import plugin from manifest** and
   "mcpServers": {
     "digma": {
       "command": "node",
-      "args": ["/Users/karambit/Sites/ai-ops/digma/dist/server.js"]
+      "args": ["digma/dist/server.js"]
     }
   }
 }
@@ -63,7 +63,7 @@ For the web app, use **Plugins > Development > Import plugin from manifest** and
   "mcpServers": {
     "digma": {
       "command": "node",
-      "args": ["/Users/karambit/Sites/ai-ops/digma/dist/server.js"]
+      "args": ["digma/dist/server.js"]
     }
   }
 }
@@ -91,7 +91,7 @@ Pass environment variables in your MCP config:
   "mcpServers": {
     "digma": {
       "command": "node",
-      "args": ["/Users/karambit/Sites/ai-ops/digma/dist/server.js"],
+      "args": ["digma/dist/server.js"],
       "env": {
         "DIGMA_PORT": "4000"
       }
