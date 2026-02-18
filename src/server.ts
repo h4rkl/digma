@@ -286,6 +286,360 @@ const server = new McpServer({
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+const TEXT_ROLE_VALUES = [
+  "display",
+  "heading",
+  "subheading",
+  "body",
+  "caption",
+  "button",
+  "label",
+  "code",
+] as const;
+
+const textRoleSchema = z.enum(TEXT_ROLE_VALUES);
+const textRoleLookup = new Set<string>(TEXT_ROLE_VALUES);
+
+type TextRole = (typeof TEXT_ROLE_VALUES)[number];
+type TypographyArchetype =
+  | "modern_product"
+  | "editorial_luxury"
+  | "friendly_human"
+  | "playful_creative"
+  | "enterprise_trust"
+  | "developer_technical";
+
+interface TypographyProfile {
+  archetype: TypographyArchetype;
+  label: string;
+  keywords: string[];
+  headingFamilies: string[];
+  bodyFamilies: string[];
+  monoFamilies: string[];
+  rationale: string;
+}
+
+interface TypographyRecommendation {
+  textRole: TextRole;
+  archetype: TypographyArchetype;
+  archetypeLabel: string;
+  matchedKeywords: string[];
+  fontFamily: string;
+  fontStyle: string;
+  fallbackFamilies: string[];
+  rationale: string;
+}
+
+interface TypographyInput {
+  text: string;
+  designBrief?: string;
+  textRole?: string;
+  preferSerif?: boolean;
+  preferMonospace?: boolean;
+  fontFamily?: string;
+  fontStyle?: string;
+}
+
+interface CreateTextParams extends TypographyInput {
+  x?: number;
+  y?: number;
+  fontSize?: number;
+  fillColor?: string;
+  width?: number;
+  letterSpacing?: number;
+  lineHeight?: number;
+  textAlignHorizontal?: "LEFT" | "CENTER" | "RIGHT" | "JUSTIFIED";
+  parentId?: string;
+}
+
+const TYPOGRAPHY_PROFILES: TypographyProfile[] = [
+  {
+    archetype: "modern_product",
+    label: "Modern Product",
+    keywords: [
+      "modern",
+      "minimal",
+      "clean",
+      "saas",
+      "startup",
+      "dashboard",
+      "tech",
+      "app",
+      "ai",
+      "productivity",
+    ],
+    headingFamilies: ["Inter", "Manrope", "DM Sans", "Roboto", "Arial"],
+    bodyFamilies: ["Inter", "Roboto", "Arial", "Helvetica"],
+    monoFamilies: ["JetBrains Mono", "IBM Plex Mono", "Menlo", "Consolas", "Courier New"],
+    rationale: "Prioritize neutral sans-serif type for digital-first interfaces.",
+  },
+  {
+    archetype: "editorial_luxury",
+    label: "Editorial / Luxury",
+    keywords: [
+      "editorial",
+      "luxury",
+      "fashion",
+      "premium",
+      "elegant",
+      "sophisticated",
+      "magazine",
+      "serif",
+      "high-end",
+      "boutique",
+    ],
+    headingFamilies: ["Playfair Display", "Merriweather", "Georgia", "Times New Roman"],
+    bodyFamilies: ["Inter", "Lato", "Arial", "Helvetica"],
+    monoFamilies: ["JetBrains Mono", "Menlo", "Consolas", "Courier New"],
+    rationale:
+      "Use high-contrast serif headings with clean sans-serif support text for premium tone.",
+  },
+  {
+    archetype: "friendly_human",
+    label: "Friendly / Human",
+    keywords: [
+      "friendly",
+      "approachable",
+      "warm",
+      "community",
+      "wellness",
+      "health",
+      "kids",
+      "family",
+      "casual",
+      "rounded",
+    ],
+    headingFamilies: ["Nunito", "Poppins", "Quicksand", "Inter", "Arial"],
+    bodyFamilies: ["Nunito", "Inter", "Poppins", "Arial"],
+    monoFamilies: ["JetBrains Mono", "IBM Plex Mono", "Menlo", "Consolas", "Courier New"],
+    rationale: "Use soft, rounded sans-serif families to keep tone warm and accessible.",
+  },
+  {
+    archetype: "playful_creative",
+    label: "Playful / Creative",
+    keywords: [
+      "creative",
+      "bold",
+      "fun",
+      "festival",
+      "music",
+      "vibrant",
+      "gaming",
+      "youth",
+      "expressive",
+      "campaign",
+    ],
+    headingFamilies: ["Poppins", "Montserrat", "Nunito", "Arial Black", "Inter"],
+    bodyFamilies: ["Inter", "Poppins", "Montserrat", "Arial"],
+    monoFamilies: ["JetBrains Mono", "IBM Plex Mono", "Menlo", "Consolas", "Courier New"],
+    rationale:
+      "Favor high-energy geometric sans-serif for headlines, with simpler support type for readability.",
+  },
+  {
+    archetype: "enterprise_trust",
+    label: "Enterprise / Trust",
+    keywords: [
+      "enterprise",
+      "corporate",
+      "finance",
+      "bank",
+      "insurance",
+      "legal",
+      "security",
+      "compliance",
+      "professional",
+      "government",
+    ],
+    headingFamilies: ["IBM Plex Sans", "Source Sans 3", "Roboto", "Inter", "Arial"],
+    bodyFamilies: ["Source Sans 3", "IBM Plex Sans", "Roboto", "Inter", "Arial"],
+    monoFamilies: ["IBM Plex Mono", "JetBrains Mono", "Menlo", "Consolas", "Courier New"],
+    rationale: "Prioritize sober, structured sans-serif families for trust-heavy products.",
+  },
+  {
+    archetype: "developer_technical",
+    label: "Developer / Technical",
+    keywords: [
+      "developer",
+      "engineering",
+      "technical",
+      "code",
+      "api",
+      "docs",
+      "terminal",
+      "cli",
+      "hacker",
+      "opensource",
+    ],
+    headingFamilies: ["IBM Plex Sans", "Inter", "Roboto", "Arial"],
+    bodyFamilies: ["IBM Plex Sans", "Inter", "Roboto", "Arial"],
+    monoFamilies: ["JetBrains Mono", "IBM Plex Mono", "Source Code Pro", "Menlo", "Consolas"],
+    rationale:
+      "Use pragmatic sans-serif for UI copy and monospace families where technical texture matters.",
+  },
+];
+
+const ROLE_STYLE_PRIORITY: Record<TextRole, string[]> = {
+  display: ["Bold", "Semi Bold", "Regular"],
+  heading: ["Semi Bold", "Bold", "Medium", "Regular"],
+  subheading: ["Medium", "Semi Bold", "Regular"],
+  body: ["Regular", "Book", "Medium"],
+  caption: ["Regular", "Medium"],
+  button: ["Medium", "Semi Bold", "Bold"],
+  label: ["Medium", "Semi Bold", "Regular"],
+  code: ["Regular", "Medium"],
+};
+
+function normalize(text: string | undefined): string {
+  return (text || "").trim().toLowerCase();
+}
+
+function dedupe(values: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    if (!value) continue;
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(value);
+  }
+  return result;
+}
+
+function parseRole(explicitRole?: string): TextRole | undefined {
+  if (!explicitRole) return undefined;
+  const role = explicitRole.toLowerCase();
+  if (textRoleLookup.has(role)) {
+    return role as TextRole;
+  }
+  return undefined;
+}
+
+function inferTextRole(text: string, explicitRole?: string): TextRole {
+  const parsed = parseRole(explicitRole);
+  if (parsed) return parsed;
+
+  const trimmed = text.trim();
+  const lower = trimmed.toLowerCase();
+  if (!trimmed) return "body";
+
+  if (
+    /^(get started|start free|start trial|sign in|sign up|continue|buy now|learn more|join now)$/i.test(
+      trimmed,
+    )
+  ) {
+    return "button";
+  }
+
+  if (
+    lower.includes("http://") ||
+    lower.includes("https://") ||
+    lower.includes("npm install") ||
+    lower.includes("const ")
+  ) {
+    return "code";
+  }
+
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  if (words.length <= 4 && trimmed === trimmed.toUpperCase()) return "label";
+  if (words.length <= 7 && trimmed.length <= 56) return "heading";
+  if (words.length <= 14 && trimmed.length <= 96) return "subheading";
+  if (words.length >= 24 || trimmed.length >= 160) return "body";
+  return "body";
+}
+
+function detectProfile(brief: string): {
+  profile: TypographyProfile;
+  matchedKeywords: string[];
+} {
+  const normalized = normalize(brief);
+  let best = TYPOGRAPHY_PROFILES[0];
+  let bestScore = 0;
+  let bestMatches: string[] = [];
+
+  for (const profile of TYPOGRAPHY_PROFILES) {
+    const matches = profile.keywords.filter((keyword) => normalized.includes(keyword));
+    if (matches.length > bestScore) {
+      best = profile;
+      bestScore = matches.length;
+      bestMatches = matches;
+    }
+  }
+
+  return { profile: best, matchedKeywords: bestMatches };
+}
+
+function buildFamilyCandidates(
+  profile: TypographyProfile,
+  role: TextRole,
+  preferSerif = false,
+  preferMonospace = false,
+): string[] {
+  if (preferMonospace || role === "code") {
+    return dedupe([
+      ...profile.monoFamilies,
+      "JetBrains Mono",
+      "IBM Plex Mono",
+      "Menlo",
+      "Consolas",
+      "Courier New",
+    ]);
+  }
+
+  const headingLike = role === "display" || role === "heading" || role === "subheading";
+  const roleFamilies = headingLike ? profile.headingFamilies : profile.bodyFamilies;
+
+  const serifFallbacks = ["Georgia", "Times New Roman", "Merriweather"];
+  const sansFallbacks = ["Inter", "Roboto", "Arial", "Helvetica"];
+
+  return dedupe([
+    ...(preferSerif ? serifFallbacks : []),
+    ...roleFamilies,
+    ...(preferSerif ? [] : sansFallbacks),
+    "Inter",
+    "Arial",
+    "Helvetica",
+  ]);
+}
+
+function chooseTypography(input: TypographyInput): TypographyRecommendation {
+  const role = inferTextRole(input.text, input.textRole);
+  const { profile, matchedKeywords } = detectProfile(input.designBrief || "");
+
+  const families = buildFamilyCandidates(
+    profile,
+    role,
+    input.preferSerif === true,
+    input.preferMonospace === true,
+  );
+
+  const fontFamily = input.fontFamily || families[0] || "Inter";
+  const fontStyle =
+    input.fontStyle ||
+    ROLE_STYLE_PRIORITY[role][0] ||
+    "Regular";
+
+  return {
+    textRole: role,
+    archetype: profile.archetype,
+    archetypeLabel: profile.label,
+    matchedKeywords,
+    fontFamily,
+    fontStyle,
+    fallbackFamilies: families.slice(1, 6),
+    rationale: profile.rationale,
+  };
+}
+
+function withTypographyDefaults(params: CreateTextParams): Record<string, unknown> {
+  const recommendation = chooseTypography(params);
+  return {
+    ...params,
+    fontFamily: params.fontFamily || recommendation.fontFamily,
+    fontStyle: params.fontStyle || recommendation.fontStyle,
+  };
+}
+
 function ok(result: unknown) {
   return {
     content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
@@ -387,7 +741,7 @@ server.tool(
 // 5. Create Text
 server.tool(
   "create_text",
-  "Create a text element. Supports font family, size, weight (via fontStyle), color, and text wrapping.",
+  "Create a text element. Supports font family, size, weight (via fontStyle), color, and text wrapping. If fontFamily is omitted, Digma can infer typography from the design brief and text role.",
   {
     text: z.string().describe("The text content to display"),
     x: z.number().optional().describe("X position"),
@@ -400,14 +754,33 @@ server.tool(
       .string()
       .optional()
       .describe(
-        "Font family name (default: 'Inter'). Must be available in the Figma file.",
+        "Font family name. If omitted, Digma selects one from the design brief and text role (fallback: Inter).",
       ),
     fontStyle: z
       .string()
       .optional()
       .describe(
-        "Font style e.g. 'Regular', 'Bold', 'Semi Bold', 'Medium', 'Light' (default: 'Regular')",
+        "Font style e.g. 'Regular', 'Bold', 'Semi Bold', 'Medium', 'Light'. If omitted, Digma selects a role-appropriate weight.",
       ),
+    designBrief: z
+      .string()
+      .optional()
+      .describe(
+        "Optional design brief or brand direction. Used to infer font family/style when not explicitly set.",
+      ),
+    textRole: textRoleSchema
+      .optional()
+      .describe(
+        "Semantic role for this text: display, heading, subheading, body, caption, button, label, code.",
+      ),
+    preferSerif: z
+      .boolean()
+      .optional()
+      .describe("If true, prioritize serif families (helpful for editorial/luxury styles)."),
+    preferMonospace: z
+      .boolean()
+      .optional()
+      .describe("If true, prioritize monospace families (helpful for developer/terminal UI)."),
     fillColor: z
       .string()
       .optional()
@@ -424,7 +797,35 @@ server.tool(
       .describe("Horizontal text alignment"),
     parentId: z.string().optional().describe("Parent frame ID"),
   },
-  async (params) => run("create_text", params),
+  async (params) => run("create_text", withTypographyDefaults(params as CreateTextParams)),
+);
+
+server.tool(
+  "recommend_typography",
+  "Recommend font family and style from a design brief before creating text nodes.",
+  {
+    text: z
+      .string()
+      .describe("Text content that will be rendered (used to infer semantic role)."),
+    designBrief: z
+      .string()
+      .optional()
+      .describe("Design brief or brand voice description."),
+    textRole: textRoleSchema
+      .optional()
+      .describe(
+        "Optional explicit role override: display, heading, subheading, body, caption, button, label, code.",
+      ),
+    preferSerif: z
+      .boolean()
+      .optional()
+      .describe("If true, prioritize serif recommendations."),
+    preferMonospace: z
+      .boolean()
+      .optional()
+      .describe("If true, prioritize monospace recommendations."),
+  },
+  async (params) => ok(chooseTypography(params)),
 );
 
 // 6. Create Line
